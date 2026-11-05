@@ -534,6 +534,7 @@ class MainWindow(QMainWindow):
         self.new_employee_entry = QLineEdit()
         self.new_employee_entry.setPlaceholderText("employee name")
         self.employee_form_department = QComboBox()
+        make_searchable_combo(self.employee_form_department, "Type or choose a department")
         self.new_badge_entry = QLineEdit()
         self.new_badge_entry.setPlaceholderText("badge number")
         add_employee_button = QPushButton("Add employee")

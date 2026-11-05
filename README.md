@@ -31,7 +31,8 @@ python main.py
 
 ## A normal day
 1. Employees tab (once): add the departments, then each employee WITH
-   their own badge number.
+   their own badge number. Type a department name in the employee form's
+   department dropdown to find it quickly.
 2. Today tab: choose the Department and the Employee. Their badge is
    shown. Give them that badge, keep their ID card, click "Check in".
    The time comes from the computer's clock.

@@ -357,6 +357,22 @@ def run_window_scenario(window, folder):
     check("duplicate department shows an error", messages[-1][0] == "error")
     window.new_department_entry.clear()
 
+    check(
+        "employee department selector is searchable and lists departments",
+        window.employee_form_department.isEditable()
+        and window.employee_form_department.count() == 2,
+    )
+    window.employee_form_department.setFocus()
+    window.employee_form_department.lineEdit().selectAll()
+    QTest.keyClicks(window.employee_form_department.lineEdit(), "fin")
+    employee_department_matches = window.employee_form_department.completer().completionModel()
+    check(
+        "typing filters employee department suggestions",
+        employee_department_matches.rowCount() == 1
+        and employee_department_matches.index(0, 0).data() == "Finance",
+    )
+    window.employee_form_department.lineEdit().clear()
+
     for name, department, badge in (("Alice Ngu", "Security", "a12"), ("Bob Tamba", "Finance", "B7")):
         choose(window.employee_form_department, department)
         window.new_employee_entry.setText(name)
