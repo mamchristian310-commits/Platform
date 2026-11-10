@@ -13,7 +13,7 @@ import shutil
 import sys
 import tempfile
 import traceback
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 try:
@@ -92,6 +92,23 @@ def check_legacy_database_migration(folder):
         "existing databases migrate and retain attendance badge values",
         len(records) == 1 and records[0].badge == "OLD1",
     )
+    employee = services.list_employees(include_inactive=True)[0]
+    check(
+        "existing employees migrate with contact fields unset",
+        employee.phone_number is None and employee.id_card_number is None,
+    )
+    expect_error(
+        "legacy employee must have contact information before check-in",
+        services.check_in,
+        employee.id,
+        contains="phone number and ID card number",
+    )
+    services.update_employee_details(employee.id, "+237600000001", "12345")
+    employee = services.list_employees(include_inactive=True)[0]
+    check(
+        "legacy employee contact details can be completed",
+        employee.phone_number == "+237600000001" and employee.id_card_number == 12345,
+    )
     models.engine.dispose()
 
 
@@ -109,20 +126,22 @@ def check_services(folder):
     services.add_department("Éducation")
     expect_error("same department, other capitals: refused", services.add_department, "FINANCE", contains="already exists")
     expect_error("same department, no accent: refused", services.add_department, "education", contains="already exists")
-    expect_error("empty department name: refused", services.add_department, "   ", contains="enter a department")
+    expect_error("empty structure name: refused", services.add_department, "   ", contains="enter a structure")
     departments = {name: department_id for department_id, name in services.list_departments()}
     check("departments sorted, Éducation under E", list(departments) == ["Éducation", "Finance", "Security"])
 
-    badge = services.add_employee("Alice  Ngu", departments["Security"], " a12 ")
+    badge = services.add_employee("Alice  Ngu", departments["Security"], " a12 ", "+237600000001", "1001")
     check("badge is saved in capitals, spaces removed", badge == "A12")
-    services.add_employee("Bob Tamba", departments["Finance"], "B7")
-    services.add_employee("Éric Mbarga", departments["Finance"], "B5")
-    services.add_employee("Alice Ngu", departments["Finance"], "C3")   # same name, other department: allowed
-    expect_error("same person twice: refused", services.add_employee, "alice ngu", departments["Security"], "Z1", contains="already registered")
-    expect_error("same person without the accent: refused", services.add_employee, "Eric Mbarga", departments["Finance"], "Z2", contains="already registered")
-    expect_error("a badge owned by someone else: refused", services.add_employee, "New Person", departments["Security"], "b7", contains="already belongs to Bob Tamba")
-    expect_error("empty badge: refused", services.add_employee, "New Person", departments["Security"], "  ", contains="badge number")
-    expect_error("empty name: refused", services.add_employee, "", departments["Security"], "Z3", contains="enter the employee")
+    services.add_employee("Bob Tamba", departments["Finance"], "B7", "+237600000002", "1002")
+    services.add_employee("Éric Mbarga", departments["Finance"], "B5", "+237600000003", "1003")
+    services.add_employee("Alice Ngu", departments["Finance"], "C3", "+237600000004", "1004")   # same name, other department: allowed
+    expect_error("same person twice: refused", services.add_employee, "alice ngu", departments["Security"], "Z1", "+237600000005", "1005", contains="already registered")
+    expect_error("same person without the accent: refused", services.add_employee, "Eric Mbarga", departments["Finance"], "Z2", "+237600000006", "1006", contains="already registered")
+    expect_error("a badge owned by someone else: refused", services.add_employee, "New Person", departments["Security"], "b7", "+237600000007", "1007", contains="already belongs to Bob Tamba")
+    expect_error("empty badge: refused", services.add_employee, "New Person", departments["Security"], "  ", "+237600000008", "1008", contains="badge number")
+    expect_error("empty name: refused", services.add_employee, "", departments["Security"], "Z3", "+237600000009", "1009", contains="enter the employee")
+    expect_error("phone number requires international format", services.add_employee, "New Person", departments["Security"], "Z4", "237600000010", "1010", contains="+ followed by")
+    expect_error("ID card number must be a positive integer", services.add_employee, "New Person", departments["Security"], "Z5", "+237600000011", "zero", contains="positive integer")
 
     listing = [(e.department, e.name) for e in services.list_employees()]
     check(
@@ -130,6 +149,12 @@ def check_services(folder):
         listing == [("Finance", "Alice Ngu"), ("Finance", "Bob Tamba"), ("Finance", "Éric Mbarga"), ("Security", "Alice Ngu")],
     )
     people = {(e.name, e.department): e for e in services.list_employees()}
+    check(
+        "employee list includes phone and integer ID card number",
+        people[("Alice Ngu", "Security")].phone_number == "+237600000001"
+        and people[("Alice Ngu", "Security")].id_card_number == 1001
+        and isinstance(people[("Alice Ngu", "Security")].id_card_number, int),
+    )
     alice_sec = people[("Alice Ngu", "Security")].id
     alice_fin = people[("Alice Ngu", "Finance")].id
     bob = people[("Bob Tamba", "Finance")].id
@@ -210,8 +235,8 @@ def check_services(folder):
     check("deactivated: still there when asked for", eric in [e.id for e in services.list_employees(include_inactive=True)])
     check("deactivated: his history is kept", [r.employee for r in search(name_text="eric")] == ["Éric Mbarga"])
     expect_error("deactivated: cannot check in", services.check_in, eric, contains="deactivated")
-    expect_error("deactivated: his badge stays reserved", services.add_employee, "Someone New", departments["Finance"], "B5", contains="already belongs to Éric Mbarga")
-    expect_error("deactivated: adding him again points to Reactivate", services.add_employee, "éric mbarga", departments["Finance"], "Q9", contains="deactivated")
+    expect_error("deactivated: his badge stays reserved", services.add_employee, "Someone New", departments["Finance"], "B5", "+237600000005", "1005", contains="already belongs to Éric Mbarga")
+    expect_error("deactivated: adding him again points to Reactivate", services.add_employee, "éric mbarga", departments["Finance"], "Q9", "+237600000006", "1006", contains="deactivated")
     services.reactivate_employee(eric)
     check("reactivated: back in the normal list", eric in [e.id for e in services.list_employees()])
 
@@ -242,6 +267,8 @@ def check_services(folder):
         "Former Badge Attempt",
         departments["Security"],
         "A12",
+        "+237600000007",
+        "1007",
         contains="previously used by Alice Ngu",
     )
     expect_error(
@@ -280,7 +307,16 @@ def check_safety_net():
 
     department_id = services.list_departments()[0][0]
     with Session(models.engine) as session:
-        session.add(models.Employee(name="Copy", name_key="copy", department_id=department_id, badge_number="A99", active=True))
+        existing_badge = services.list_employees()[0].badge
+        session.add(
+            models.Employee(
+                name="Copy",
+                name_key="copy",
+                department_id=department_id,
+                badge_number=existing_badge,
+                active=True,
+            )
+        )
         try:
             session.commit()
             check("database refuses the same badge for two employees", False)
@@ -299,12 +335,17 @@ def check_reports(folder):
     reports.export_to_excel(records, path)
 
     workbook = load_workbook(path)
-    check("Excel file has the 3 sheets", workbook.sheetnames == ["Records", "By department", "By employee"])
+    check("Excel file has the 3 sheets", workbook.sheetnames == ["Records", "By structure", "By employee"])
     sheet = workbook["Records"]
     check("Excel 'Records': header + one row per visit", sheet.max_row == len(records) + 1)
     check("Excel 'Records': header is correct", [c.value for c in sheet[1]] == reports.DETAIL_COLUMNS)
     check("Excel keeps the accents", any(c.value == "Éric Mbarga" for row in sheet.iter_rows() for c in row))
-    check("Excel 'By department' has a row per department", workbook["By department"].max_row == 3)
+    check(
+        "Excel records include phone and ID card numbers",
+        any(cell.value == "+237600000001" for row in sheet.iter_rows() for cell in row)
+        and any(cell.value == 1001 for row in sheet.iter_rows() for cell in row),
+    )
+    check("Excel 'By structure' has a row per structure", workbook["By structure"].max_row == 3)
 
 
 # ---------------------------------------------------------------
@@ -340,7 +381,7 @@ def run_window_scenario(window, folder):
         window.new_department_entry.setText(name)
         window.add_department_clicked()
     check("both departments are in the check-in list", window.checkin_department.count() == 2)
-    check("History list has 'All departments' + the 2", window.history_department.count() == 3)
+    check("History list has 'All structures' + the 2", window.history_department.count() == 3)
     check("Today department selector is searchable and still lists its options", window.checkin_department.isEditable() and window.checkin_department.count() == 2)
     window.checkin_department.setFocus()
     window.checkin_department.lineEdit().selectAll()
@@ -373,14 +414,41 @@ def run_window_scenario(window, folder):
     )
     window.employee_form_department.lineEdit().clear()
 
-    for name, department, badge in (("Alice Ngu", "Security", "a12"), ("Bob Tamba", "Finance", "B7")):
-        choose(window.employee_form_department, department)
+    for name, structure, badge, phone, card in (
+        ("Alice Ngu", "Security", "a12", "+237600000001", "1001"),
+        ("Bob Tamba", "Finance", "B7", "+237600000002", "1002"),
+    ):
+        choose(window.employee_form_department, structure)
         window.new_employee_entry.setText(name)
         window.new_badge_entry.setText(badge)
+        window.new_phone_entry.setText(phone)
+        window.new_id_card_entry.setText(card)
         window.add_employee_clicked()
     tree = window.employee_tree
-    check("tree shows the departments with their counts", [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())] == ["Finance   (1)", "Security   (1)"])
-    check("the employee is inside her department", tree.topLevelItem(1).child(0).text(0) == "Alice Ngu" and tree.topLevelItem(1).child(0).text(1) == "A12")
+    check("tree shows the structures with their counts", [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())] == ["Finance   (1)", "Security   (1)"])
+    check(
+        "employee table headings use Structure and include contact fields",
+        [tree.headerItem().text(column) for column in range(tree.columnCount())]
+        == ["Structure / Employee", "Badge", "Phone number", "ID card number", "Status"],
+    )
+    check(
+        "employee row shows badge, phone, and ID card number",
+        tree.topLevelItem(1).child(0).text(0) == "Alice Ngu"
+        and tree.topLevelItem(1).child(0).text(1) == "A12"
+        and tree.topLevelItem(1).child(0).text(2) == "+237600000001"
+        and tree.topLevelItem(1).child(0).text(3) == "1001",
+    )
+    tree.setCurrentItem(tree.topLevelItem(1).child(0))
+    with patch(
+        "main_window.QInputDialog.getText",
+        side_effect=[("+237600000001", True), ("1001", True)],
+    ):
+        window.edit_employee_details_clicked()
+    check(
+        "Employees tab can update phone and ID card details",
+        tree.topLevelItem(1).child(0).text(2) == "+237600000001"
+        and tree.topLevelItem(1).child(0).text(3) == "1001",
+    )
 
     window.employee_search.setText("FINANCE")
     check(
@@ -405,11 +473,15 @@ def run_window_scenario(window, folder):
     choose(window.employee_form_department, "Finance")
     window.new_employee_entry.setText("Bobby")
     window.new_badge_entry.setText("a12")
+    window.new_phone_entry.setText("+237600000003")
+    window.new_id_card_entry.setText("1003")
     window.add_employee_clicked()
     check("a badge already owned is refused", messages[-1][0] == "error" and "already belongs to Alice Ngu" in messages[-1][2])
     check("the typed text stays so it can be corrected", window.new_employee_entry.text() == "Bobby")
     window.new_employee_entry.clear()
     window.new_badge_entry.clear()
+    window.new_phone_entry.clear()
+    window.new_id_card_entry.clear()
 
     # --- check in
     choose(window.checkin_department, "Security")
@@ -429,14 +501,40 @@ def run_window_scenario(window, folder):
     check("checking in with nobody chosen shows a warning", messages[-1][0] == "warning")
     choose(window.checkin_employee, "Alice Ngu")
     check("her own badge is shown", window.badge_label.text() == "Badge: A12")
-    window.check_in_clicked()
+    normal_check_in = services.check_in
+    overnight_start = datetime.now().replace(microsecond=0) - timedelta(days=1)
+    with patch(
+        "services.check_in",
+        side_effect=lambda employee_id: normal_check_in(employee_id, now=overnight_start),
+    ):
+        window.check_in_clicked()
     check("one row in the Today table", window.today_table.rowCount() == 1)
+    check(
+        "Today table headings include Structure and contact fields",
+        [
+            window.today_table.horizontalHeaderItem(column).text()
+            for column in range(window.today_table.columnCount())
+        ]
+        == ["Employee", "Structure", "Badge", "Phone number", "ID card number", "Time in", "Time out"],
+    )
     check("row shows name, department and badge", [cell(window.today_table, 0, c) for c in (0, 1, 2)] == ["Alice Ngu", "Security", "A12"])
-    check("time out is still empty", cell(window.today_table, 0, 4) == "")
+    check(
+        "Today row shows phone and integer ID card number",
+        cell(window.today_table, 0, 3) == "+237600000001"
+        and cell(window.today_table, 0, 4) == "1001",
+    )
+    check("time out is still empty", cell(window.today_table, 0, 6) == "")
+    check(
+        "missed same-day checkout colors the entire Today row red",
+        all(
+            window.today_table.item(0, column).background().color().name() == "#f8d7da"
+            for column in range(window.today_table.columnCount())
+        ),
+    )
     check(
         "Today department filter lists registered departments",
         [window.today_department_filter.itemText(i) for i in range(window.today_department_filter.count())]
-        == ["All departments", "Finance", "Security"],
+        == ["All structures", "Finance", "Security"],
     )
     choose(window.today_department_filter, "Finance")
     check("Today department filter hides rows from other departments", window.today_table.rowCount() == 0)
@@ -446,7 +544,7 @@ def run_window_scenario(window, folder):
         window.today_table.rowCount() == 1
         and cell(window.today_table, 0, 1) == "Security",
     )
-    choose(window.today_department_filter, "All departments")
+    choose(window.today_department_filter, "All structures")
     check("Today department filter can show all departments", window.today_table.rowCount() == 1)
     check("1 person on the platform", "On the platform now: 1" in window.inside_label.text())
     check("she can't be picked again while inside", window.checkin_employee.count() == 0)
@@ -473,19 +571,32 @@ def run_window_scenario(window, folder):
     window.today_table.selectRow(0)
     answers["confirm"] = False
     window.check_out_clicked()
-    check("answering No changes nothing", cell(window.today_table, 0, 4) == "")
+    check("answering No changes nothing", cell(window.today_table, 0, 6) == "")
     answers["confirm"] = True
     window.check_out_clicked()
-    check("answering Yes fills the time out", cell(window.today_table, 0, 4) != "")
+    check("answering Yes fills the time out", cell(window.today_table, 0, 6) != "")
     check("checked-out employee remains visible in Today", window.today_table.rowCount() == 1)
+    check(
+        "missed same-day checkout remains red after checkout",
+        all(
+            window.today_table.item(0, column).background().color().name() == "#f8d7da"
+            for column in range(window.today_table.columnCount())
+        ),
+    )
     check("0 people on the platform again", "On the platform now: 0" in window.inside_label.text())
     check("she is available for check-in again", window.checkin_employee.count() == 1)
     window.check_out_clicked()
     check("checking out someone who already left is explained", messages[-1][0] == "info")
 
     # --- history and Excel
+    window.all_dates.setChecked(True)
     window.search_clicked()
     check("History finds today's visit", window.result_label.text() == "1 record(s) found")
+    check(
+        "History row includes current phone and ID card numbers",
+        cell(window.history_table, 0, 4) == "+237600000001"
+        and cell(window.history_table, 0, 5) == "1001",
+    )
     window.name_filter.setText("zzz")
     window.search_clicked()
     check("History: a name nobody has finds 0", window.result_label.text() == "0 record(s) found")
@@ -523,10 +634,10 @@ def run_window_scenario(window, folder):
     window.deactivate_clicked()
     check("deactivated employee disappears from the tree", tree.topLevelItem(1).childCount() == 0)
     window.show_inactive.setChecked(True)
-    check("'Show deactivated' brings her back, marked", tree.topLevelItem(1).childCount() == 1 and tree.topLevelItem(1).child(0).text(2) == "Deactivated")
+    check("'Show deactivated' brings her back, marked", tree.topLevelItem(1).childCount() == 1 and tree.topLevelItem(1).child(0).text(4) == "Deactivated")
     tree.topLevelItem(1).child(0).setSelected(True)
     window.reactivate_clicked()
-    check("reactivated: no longer marked", tree.topLevelItem(1).child(0).text(2) == "")
+    check("reactivated: no longer marked", tree.topLevelItem(1).child(0).text(4) == "")
     check("reactivated: back in the check-in list", window.checkin_employee.count() == 1)
 
 

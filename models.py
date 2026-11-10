@@ -51,6 +51,8 @@ class Employee(Base):
     # unique=True: a badge belongs to ONE employee and can never be shared.
     # A deactivated employee keeps their badge, so it can't be given to anyone else.
     badge_number: Mapped[str] = mapped_column(String(50), unique=True)
+    phone_number: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    id_card_number: Mapped[Optional[int]] = mapped_column(nullable=True)
 
     # Employees are never deleted, only deactivated, so old records keep their meaning
     active: Mapped[bool] = mapped_column(default=True)
@@ -102,6 +104,14 @@ def init_db(db_path=None):
                 "WHERE badge_number IS NULL"
             )
         )
+
+        employee_columns = {
+            column["name"] for column in inspect(connection).get_columns("employee")
+        }
+        if "phone_number" not in employee_columns:
+            connection.execute(text("ALTER TABLE employee ADD COLUMN phone_number VARCHAR(16)"))
+        if "id_card_number" not in employee_columns:
+            connection.execute(text("ALTER TABLE employee ADD COLUMN id_card_number INTEGER"))
 
         # Safety net inside the database itself: even if the program had a bug,
         # SQLite refuses to record a person as being on the platform twice.
