@@ -11,7 +11,18 @@ from openpyxl.utils import get_column_letter
 
 from common import format_duration
 
-DETAIL_COLUMNS = ["Date", "Employee", "Department", "Badge", "Time in", "Time out", "Duration", "Hours"]
+DETAIL_COLUMNS = [
+    "Date",
+    "Employee",
+    "Structure",
+    "Badge",
+    "Phone number",
+    "ID card number",
+    "Time in",
+    "Time out",
+    "Duration",
+    "Hours",
+]
 
 
 def records_to_dataframe(records):
@@ -23,8 +34,10 @@ def records_to_dataframe(records):
             {
                 "Date": record.time_in.date(),
                 "Employee": record.employee,
-                "Department": record.department,
+                "Structure": record.department,
                 "Badge": record.badge,
+                "Phone number": record.phone_number,
+                "ID card number": record.id_card_number,
                 "Time in": record.time_in,
                 "Time out": record.time_out,
                 "Duration": format_duration(duration),
@@ -35,11 +48,11 @@ def records_to_dataframe(records):
 
 
 def summary_by_department(detail):
-    columns = ["Department", "Visits", "Total hours"]
+    columns = ["Structure", "Visits", "Total hours"]
     if detail.empty:
         return pd.DataFrame(columns=columns)
 
-    summary = detail.groupby("Department").agg(
+    summary = detail.groupby("Structure").agg(
         Visits=("Employee", "size"),
         **{"Total hours": ("Hours", "sum")},   # visits still in progress have no hours yet
     )
@@ -48,11 +61,24 @@ def summary_by_department(detail):
 
 
 def summary_by_employee(detail):
-    columns = ["Department", "Employee", "Badge", "Visits", "Total hours", "First visit", "Last visit"]
+    columns = [
+        "Structure",
+        "Employee",
+        "Badge",
+        "Phone number",
+        "ID card number",
+        "Visits",
+        "Total hours",
+        "First visit",
+        "Last visit",
+    ]
     if detail.empty:
         return pd.DataFrame(columns=columns)
 
-    summary = detail.groupby(["Department", "Employee", "Badge"]).agg(
+    summary = detail.groupby(
+        ["Structure", "Employee", "Badge", "Phone number", "ID card number"],
+        dropna=False,
+    ).agg(
         Visits=("Date", "size"),
         **{
             "Total hours": ("Hours", "sum"),
@@ -104,7 +130,7 @@ def export_to_excel(records, path):
 
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         detail.to_excel(writer, sheet_name="Records", index=False)
-        by_department.to_excel(writer, sheet_name="By department", index=False)
+        by_department.to_excel(writer, sheet_name="By structure", index=False)
         by_employee.to_excel(writer, sheet_name="By employee", index=False)
         for sheet in writer.book.worksheets:
             style_sheet(sheet)

@@ -41,9 +41,10 @@ import reports
 import services
 from common import RuleError, fold, format_duration, format_time
 
-ALL_DEPARTMENTS = "All departments"
+ALL_DEPARTMENTS = "All structures"
 
 GREEN = QBrush(QColor("#d8f3dc"))   # background of people still on the platform
+RED = QBrush(QColor("#f8d7da"))
 BLACK = QBrush(QColor("black"))
 GREY = QBrush(QColor("gray"))
 
@@ -84,7 +85,7 @@ def make_searchable_combo(combo, placeholder):
     completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
 
 
-def add_row(table, values, record_id=None, highlight=False):
+def add_row(table, values, record_id=None, highlight=False, overdue=False):
     row = table.rowCount()
     table.insertRow(row)
     for column, value in enumerate(values):
@@ -93,8 +94,8 @@ def add_row(table, values, record_id=None, highlight=False):
             # Hide the record's id inside the first cell, so we can find
             # the record again when the row is clicked
             item.setData(Qt.ItemDataRole.UserRole, record_id)
-        if highlight:
-            item.setBackground(GREEN)
+        if highlight or overdue:
+            item.setBackground(RED if overdue else GREEN)
             item.setForeground(BLACK)
         table.setItem(row, column, item)
 
@@ -108,13 +109,14 @@ def selected_record_id(table):
 
 
 def history_values(record):
-    # The 7 values shown for one record on the History tab
     visit_date = record.time_in.date()
     return [
         visit_date.strftime("%Y-%m-%d"),
         record.employee,
         record.department,
         record.badge,
+        record.phone_number or "Not set",
+        str(record.id_card_number) if record.id_card_number is not None else "Not set",
         format_time(record.time_in, visit_date),
         format_time(record.time_out, visit_date),
         format_duration(record.duration),
@@ -230,13 +232,13 @@ class MainWindow(QMainWindow):
 
         self.checkin_department = QComboBox()
         self.checkin_employee = QComboBox()
-        make_searchable_combo(self.checkin_department, "Type or choose a department")
+        make_searchable_combo(self.checkin_department, "Type or choose a structure")
         make_searchable_combo(self.checkin_employee, "Type or choose an employee")
         self.badge_label = QLabel("Badge: -")
         self.badge_label.setStyleSheet(BIG_BOLD)
         checkin_button = QPushButton("Check in")
 
-        form_layout.addWidget(QLabel("Department"))
+        form_layout.addWidget(QLabel("Structure"))
         form_layout.addWidget(self.checkin_department, 1)
         form_layout.addWidget(QLabel("Employee"))
         form_layout.addWidget(self.checkin_employee, 2)
@@ -244,7 +246,7 @@ class MainWindow(QMainWindow):
         form_layout.addWidget(checkin_button)
         layout.addWidget(form)
 
-        # Choosing a department fills the employee list;
+        # Choosing a structure fills the employee list;
         # choosing an employee shows THEIR badge
         self.checkin_department.currentIndexChanged.connect(self.refresh_checkin_employees)
         self.checkin_employee.currentIndexChanged.connect(self.update_badge_label)
@@ -255,7 +257,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.inside_label)
 
         department_filter = QHBoxLayout()
-        department_filter.addWidget(QLabel("Department"))
+        department_filter.addWidget(QLabel("Structure"))
         self.today_department_filter = QComboBox()
         department_filter.addWidget(self.today_department_filter, 1)
         self.today_department_filter.currentIndexChanged.connect(self.refresh_today)
@@ -263,14 +265,14 @@ class MainWindow(QMainWindow):
         layout.addLayout(department_filter)
 
         self.today_search = QLineEdit()
-        self.today_search.setPlaceholderText("Find employee by name, department, or badge")
+        self.today_search.setPlaceholderText("Find employee by name, structure, or badge")
         self.today_search.setClearButtonEnabled(True)
         self.today_search.textChanged.connect(self.refresh_today)
         layout.addWidget(self.today_search)
 
         self.today_table = make_table(
-            ["Employee", "Department", "Badge", "Time in", "Time out"],
-            [260, 200, 90, 170, 170],
+            ["Employee", "Structure", "Badge", "Phone number", "ID card number", "Time in", "Time out"],
+            [190, 160, 80, 140, 130, 130, 130],
         )
         layout.addWidget(self.today_table)
 
@@ -290,7 +292,7 @@ class MainWindow(QMainWindow):
     def check_in_clicked(self):
         data = self.checkin_employee.currentData()
         if data is None:
-            self.warn("Missing information", "Choose a department and an employee.")
+            self.warn("Missing information", "Choose a structure and an employee.")
             return
         employee_id, badge = data
 
@@ -361,20 +363,32 @@ class MainWindow(QMainWindow):
                 continue
             if search_text and not any(
                 search_text in fold(value)
-                for value in (record.employee, record.department, record.badge)
+                for value in (
+                    record.employee,
+                    record.department,
+                    record.badge,
+                    record.phone_number or "",
+                    str(record.id_card_number or ""),
+                )
             ):
                 continue
+            overdue = record.time_in.date() < today and (
+                record.time_out is None or record.time_out.date() > record.time_in.date()
+            )
             add_row(
                 self.today_table,
                 [
                     record.employee,
                     record.department,
                     record.badge,
+                    record.phone_number or "Not set",
+                    str(record.id_card_number) if record.id_card_number is not None else "Not set",
                     format_time(record.time_in, today),
                     format_time(record.time_out, today),
                 ],
                 record_id=record.id,
                 highlight=still_inside,
+                overdue=overdue,
             )
             if record.id == selected_id:
                 self.today_table.selectRow(self.today_table.rowCount() - 1)
@@ -424,7 +438,7 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.date_from, 0, 2)
         grid.addWidget(QLabel("To"), 0, 3)
         grid.addWidget(self.date_to, 0, 4)
-        grid.addWidget(QLabel("Department"), 0, 5)
+        grid.addWidget(QLabel("Structure"), 0, 5)
         grid.addWidget(self.history_department, 0, 6)
         grid.addWidget(QLabel("Employee name"), 1, 1)
         grid.addWidget(self.name_filter, 1, 2)
@@ -450,8 +464,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.result_label)
 
         self.history_table = make_table(
-            ["Date", "Employee", "Department", "Badge", "Time in", "Time out", "Time on platform"],
-            [100, 230, 180, 80, 100, 160, 130],
+            [
+                "Date",
+                "Employee",
+                "Structure",
+                "Badge",
+                "Phone number",
+                "ID card number",
+                "Time in",
+                "Time out",
+                "Time on platform",
+            ],
+            [100, 180, 150, 80, 140, 130, 140, 140, 130],
         )
         layout.addWidget(self.history_table)
         return tab
@@ -512,7 +536,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{len(self.last_search)} record(s) exported to {path}")
 
     # =============================================================
-    # TAB 3: EMPLOYEES  (organised by department)
+    # TAB 3: EMPLOYEES  (organised by structure)
     # =============================================================
     def build_employees_tab(self):
         tab = QWidget()
@@ -520,11 +544,11 @@ class MainWindow(QMainWindow):
 
         forms = QHBoxLayout()
 
-        department_form = QGroupBox("New department")
+        department_form = QGroupBox("New structure")
         department_layout = QHBoxLayout(department_form)
         self.new_department_entry = QLineEdit()
-        self.new_department_entry.setPlaceholderText("department name")
-        add_department_button = QPushButton("Add department")
+        self.new_department_entry.setPlaceholderText("structure name")
+        add_department_button = QPushButton("Add structure")
         department_layout.addWidget(self.new_department_entry)
         department_layout.addWidget(add_department_button)
         forms.addWidget(department_form)
@@ -534,14 +558,22 @@ class MainWindow(QMainWindow):
         self.new_employee_entry = QLineEdit()
         self.new_employee_entry.setPlaceholderText("employee name")
         self.employee_form_department = QComboBox()
-        make_searchable_combo(self.employee_form_department, "Type or choose a department")
+        make_searchable_combo(self.employee_form_department, "Type or choose a structure")
         self.new_badge_entry = QLineEdit()
         self.new_badge_entry.setPlaceholderText("badge number")
+        self.new_phone_entry = QLineEdit()
+        self.new_phone_entry.setPlaceholderText("phone (+123456789...)")
+        self.new_phone_entry.setToolTip("Use + followed by 7 to 15 digits.")
+        self.new_id_card_entry = QLineEdit()
+        self.new_id_card_entry.setPlaceholderText("ID card number")
+        self.new_id_card_entry.setToolTip("Enter a positive integer.")
         add_employee_button = QPushButton("Add employee")
         employee_layout.addWidget(self.new_employee_entry, 2)
         employee_layout.addWidget(QLabel("in"))
         employee_layout.addWidget(self.employee_form_department, 1)
         employee_layout.addWidget(self.new_badge_entry, 1)
+        employee_layout.addWidget(self.new_phone_entry, 1)
+        employee_layout.addWidget(self.new_id_card_entry, 1)
         employee_layout.addWidget(add_employee_button)
         forms.addWidget(employee_form, 1)
         layout.addLayout(forms)
@@ -551,33 +583,42 @@ class MainWindow(QMainWindow):
         add_employee_button.clicked.connect(self.add_employee_clicked)
         self.new_employee_entry.returnPressed.connect(self.add_employee_clicked)
         self.new_badge_entry.returnPressed.connect(self.add_employee_clicked)
+        self.new_phone_entry.returnPressed.connect(self.add_employee_clicked)
+        self.new_id_card_entry.returnPressed.connect(self.add_employee_clicked)
 
         self.show_inactive = QCheckBox("Show deactivated employees")
         self.show_inactive.toggled.connect(self.refresh_employees)
         layout.addWidget(self.show_inactive)
 
         self.employee_search = QLineEdit()
-        self.employee_search.setPlaceholderText("Search employees or departments")
+        self.employee_search.setPlaceholderText("Search employees or structures")
         self.employee_search.setClearButtonEnabled(True)
         self.employee_search.textChanged.connect(self.refresh_employees)
         layout.addWidget(self.employee_search)
 
         # A tree: each department is a parent row, and its employees are inside it
         self.employee_tree = QTreeWidget()
-        self.employee_tree.setHeaderLabels(["Department / Employee", "Badge", "Status"])
-        self.employee_tree.setColumnWidth(0, 420)
-        self.employee_tree.setColumnWidth(1, 130)
+        self.employee_tree.setHeaderLabels(
+            ["Structure / Employee", "Badge", "Phone number", "ID card number", "Status"]
+        )
+        self.employee_tree.setColumnWidth(0, 240)
+        self.employee_tree.setColumnWidth(1, 90)
+        self.employee_tree.setColumnWidth(2, 150)
+        self.employee_tree.setColumnWidth(3, 130)
         layout.addWidget(self.employee_tree)
 
         buttons = QHBoxLayout()
         change_badge_button = QPushButton("Change badge number")
+        edit_details_button = QPushButton("Update phone and ID card")
         deactivate_button = QPushButton("Deactivate selected employee")
         reactivate_button = QPushButton("Reactivate selected employee")
         buttons.addWidget(change_badge_button)
+        buttons.addWidget(edit_details_button)
         buttons.addWidget(deactivate_button)
         buttons.addWidget(reactivate_button)
         layout.addLayout(buttons)
         change_badge_button.clicked.connect(self.change_badge_clicked)
+        edit_details_button.clicked.connect(self.edit_employee_details_clicked)
         deactivate_button.clicked.connect(self.deactivate_clicked)
         reactivate_button.clicked.connect(self.reactivate_clicked)
         return tab
@@ -587,11 +628,11 @@ class MainWindow(QMainWindow):
         try:
             services.add_department(name)
         except RuleError as error:
-            self.error("Cannot add department", str(error))
+            self.error("Cannot add structure", str(error))
             return
 
         self.new_department_entry.clear()
-        self.statusBar().showMessage(f"Department '{name.strip()}' added.")
+        self.statusBar().showMessage(f"Structure '{name.strip()}' added.")
         self.refresh_departments()
         self.refresh_checkin_employees()
         self.refresh_employees()
@@ -599,18 +640,26 @@ class MainWindow(QMainWindow):
     def add_employee_clicked(self):
         department_id = self.employee_form_department.currentData()
         if department_id is None:
-            self.warn("Missing information", "Choose the employee's department.")
+            self.warn("Missing information", "Choose the employee's structure.")
             return
 
         name = self.new_employee_entry.text()
         try:
-            badge = services.add_employee(name, department_id, self.new_badge_entry.text())
+            badge = services.add_employee(
+                name,
+                department_id,
+                self.new_badge_entry.text(),
+                self.new_phone_entry.text(),
+                self.new_id_card_entry.text(),
+            )
         except RuleError as error:
             self.error("Cannot add employee", str(error))
             return
 
         self.new_employee_entry.clear()
         self.new_badge_entry.clear()
+        self.new_phone_entry.clear()
+        self.new_id_card_entry.clear()
         self.statusBar().showMessage(f"{' '.join(name.split())} added with badge {badge}.")
         self.refresh_employees()
         self.refresh_checkin_employees()
@@ -622,12 +671,54 @@ class MainWindow(QMainWindow):
         if not items:
             return None, None, None
         employee_id = items[0].data(0, Qt.ItemDataRole.UserRole)
-        return employee_id, items[0].text(0), items[0].text(2)
+        return employee_id, items[0].text(0), items[0].text(4)
+
+    def edit_employee_details_clicked(self):
+        employee_id, name, _ = self.selected_employee()
+        if employee_id is None:
+            self.warn("Nothing selected", "Click an employee (not a structure) first.")
+            return
+
+        employee = next(
+            (person for person in services.list_employees(include_inactive=True) if person.id == employee_id),
+            None,
+        )
+        if employee is None:
+            self.error("Employee not found", "Refresh the employee list and try again.")
+            return
+
+        phone, accepted = QInputDialog.getText(
+            self,
+            "Update employee details",
+            f"Phone number for {name} (+ followed by 7 to 15 digits):",
+            text=employee.phone_number or "",
+        )
+        if not accepted:
+            return
+        id_card, accepted = QInputDialog.getText(
+            self,
+            "Update employee details",
+            f"ID card number for {name} (positive integer):",
+            text=str(employee.id_card_number) if employee.id_card_number is not None else "",
+        )
+        if not accepted:
+            return
+
+        try:
+            services.update_employee_details(employee_id, phone, id_card)
+        except RuleError as error:
+            self.error("Cannot update employee details", str(error))
+            return
+
+        self.statusBar().showMessage(f"{name}'s phone and ID card details were updated.")
+        self.refresh_employees()
+        self.refresh_today()
+        self.search_clicked()
 
     def change_badge_clicked(self):
         employee_id, name, _ = self.selected_employee()
         if employee_id is None:
-            self.warn("Nothing selected", "Click an employee (not a department) first.")
+            self.warn("Nothing selected", "Click an employee (not a structure) first.")
             return
 
         badge, accepted = QInputDialog.getText(
@@ -651,7 +742,7 @@ class MainWindow(QMainWindow):
     def deactivate_clicked(self):
         employee_id, name, status = self.selected_employee()
         if employee_id is None:
-            self.warn("Nothing selected", "Click an employee (not a department) first.")
+            self.warn("Nothing selected", "Click an employee (not a structure) first.")
             return
 
         if not self.confirm(
@@ -708,12 +799,23 @@ class MainWindow(QMainWindow):
             department_matches = not search_text or search_text in fold(department_name)
             members = department_members
             if search_text and not department_matches:
-                members = [employee for employee in members if search_text in fold(employee.name)]
+                members = [
+                    employee
+                    for employee in members
+                    if any(
+                        search_text in fold(value or "")
+                        for value in (
+                            employee.name,
+                            employee.phone_number,
+                            str(employee.id_card_number or ""),
+                        )
+                    )
+                ]
                 if not members:
                     continue
             active_count = sum(1 for employee in department_members if employee.active)
 
-            parent = QTreeWidgetItem([f"{department_name}   ({active_count})", "", ""])
+            parent = QTreeWidgetItem([f"{department_name}   ({active_count})", "", "", "", ""])
             self.employee_tree.addTopLevelItem(parent)
 
             employees = department_members if department_matches else members
@@ -724,10 +826,18 @@ class MainWindow(QMainWindow):
                     status = "On platform"
                 else:
                     status = ""
-                child = QTreeWidgetItem([employee.name, employee.badge, status])
+                child = QTreeWidgetItem(
+                    [
+                        employee.name,
+                        employee.badge,
+                        employee.phone_number or "Not set",
+                        str(employee.id_card_number) if employee.id_card_number is not None else "Not set",
+                        status,
+                    ]
+                )
                 child.setData(0, Qt.ItemDataRole.UserRole, employee.id)
                 if not employee.active:
-                    for column in range(3):
+                    for column in range(5):
                         child.setForeground(column, GREY)
                 parent.addChild(child)
 

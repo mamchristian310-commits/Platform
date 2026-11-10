@@ -1,8 +1,9 @@
 # Platform Attendance Log  (PySide6 + SQLAlchemy + SQLite + Pandas + OpenPyXL)
 
 An offline desktop app that records, every day, who took service on the
-platform: employee, department, badge number, time in, time out, date.
-No internet is ever used. Employees are organised by department.
+platform: employee, structure, badge number, phone number, ID card number,
+time in, time out, and date. No internet is ever used. Employees are
+organised by structure.
 
 Each employee has one current badge. Badges are never shared; when a badge
 changes, previous attendance keeps the number recorded at that visit.
@@ -30,20 +31,22 @@ python main.py
 ```
 
 ## A normal day
-1. Employees tab (once): add the departments, then each employee WITH
-   their own badge number. Type a department name in the employee form's
-   department dropdown to find it quickly.
-2. Today tab: choose the Department and the Employee. Their badge is
+1. Employees tab (once): add the structures, then each employee with
+   their own badge, phone number (`+` followed by 7-15 digits), and
+   positive integer ID card number. Type a structure name in the employee
+   form's dropdown to find it quickly.
+2. Today tab: choose the Structure and the Employee. Their badge is
    shown. Give them that badge, keep their ID card, click "Check in".
    The time comes from the computer's clock.
-3. When the employee leaves: use the Today tab's department dropdown or
+3. When the employee leaves: use the Today tab's structure dropdown or
    search box to narrow the list if needed, click their row (green = still
-   on the platform), click "Check out selected employee", give back the ID
+   on the platform; red = they did not check out on their check-in date),
+   click "Check out selected employee", give back the ID
    card and take back the badge. The visit stays in Today with its check-out
    time, including when the employee checked in on an earlier date.
-4. History tab: search by date range, department, name or badge.
+4. History tab: search by date range, structure, name or badge.
    "Export to Excel" gives one file with three sheets: the records, a
-   summary by department and a summary by employee.
+   summary by structure and a summary by employee.
 
 ## Where the data is saved
 `C:\Users\<your Windows user>\PlatformLog\platform_log.db`
@@ -58,22 +61,26 @@ or another computer, for example at the end of every week.
 
 ## Rules the app enforces
 - A person cannot check in twice without checking out.
+- Each employee must have a phone number and positive integer ID card
+  number. Phone numbers use `+` followed by 7-15 digits. Existing employees
+  need their details filled in from Employees > Update phone and ID card
+  before they can check in.
 - A badge belongs to one employee only. A deactivated employee keeps
   their badge reserved, so it can never go to someone else. If a badge
   changes, its old number remains reserved for the same employee and past
   attendance retains the badge used for that visit.
 - Employees are never deleted, only deactivated, so old records keep
   their meaning.
-- Names and departments are compared ignoring capitals and accents
+- Names and structures are compared ignoring capitals and accents
   (Éric = eric = ERIC).
 - The database itself also refuses a second open visit for the same
   person and a badge used twice (a safety net below the program).
 
 ## Make a program you can double-click
 ```
-pyinstaller --noconfirm --onefile --windowed --name PlatformLog --icon platform_icon.ico --add-data "platform_icon.ico;." --hidden-import sqlalchemy.dialects.sqlite main.py
+pyinstaller --noconfirm --onefile --windowed --name PlatformLog --icon platform_icon.ico --add-data "platform_icon.ico;." --hidden-import sqlalchemy.dialects.sqlite --distpath PlatForm main.py
 ```
-The result is the single file `dist\PlatformLog.exe`. Copy that file to
+The result is the single file `PlatForm\PlatformLog.exe`. Copy that file to
 the platform computer and start it.
 - It is big (hundreds of MB) because PySide6 and pandas are big.
 - It starts more slowly than a folder build because it unpacks itself on
@@ -91,8 +98,9 @@ the program with a newer version never touches them.
 - A record can't be edited. Attendance logs are usually kept untouchable;
   a "correction with a reason" feature would be the right next step.
 - Existing records are updated on first launch after this version to store
-  the employee's current badge. Earlier badge changes cannot be reconstructed
-  for visits created before badge history was recorded.
+  the employee's current badge and add the new contact fields. Earlier badge
+  changes cannot be reconstructed for visits created before badge history
+  was recorded; existing employees' new contact fields start empty.
 
 ## How the code is organised
 - `models.py`    the tables, written as Python classes (SQLAlchemy ORM)

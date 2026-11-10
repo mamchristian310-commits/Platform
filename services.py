@@ -8,6 +8,7 @@ does its work, and closes it again.
 """
 
 import os
+import re
 import sqlite3
 from datetime import date, datetime, time, timedelta
 
@@ -27,12 +28,12 @@ from models import Attendance, Department, Employee
 def add_department(name):
     name = clean_name(name)
     if not name:
-        raise RuleError("Please enter a department name.")
+        raise RuleError("Please enter a structure name.")
 
     with Session(models.engine) as session:
         existing = session.scalar(select(Department).where(Department.name_key == fold(name)))
         if existing is not None:
-            raise RuleError(f"The department '{existing.name}' already exists.")
+            raise RuleError(f"The structure '{existing.name}' already exists.")
 
         session.add(Department(name=name, name_key=fold(name)))
         session.commit()
@@ -51,10 +52,25 @@ def list_departments():
 # EMPLOYEES
 # ---------------------------------------------------------------
 
-def add_employee(name, department_id, badge_number):
+def _validate_employee_details(phone_number, id_card_number):
+    phone = (phone_number or "").strip()
+    if not re.fullmatch(r"\+[0-9]{7,15}", phone):
+        raise RuleError("Enter a phone number with + followed by 7 to 15 digits.")
+
+    card_text = str(id_card_number or "").strip()
+    if not re.fullmatch(r"[0-9]+", card_text):
+        raise RuleError("Enter a positive integer ID card number.")
+    card_number = int(card_text)
+    if card_number < 1 or card_number > 9_223_372_036_854_775_807:
+        raise RuleError("The ID card number must be a positive integer.")
+    return phone, card_number
+
+
+def add_employee(name, department_id, badge_number, phone_number, id_card_number):
     # Returns the badge number as it was saved (capitals, no spaces around it)
     name = clean_name(name)
     badge = (badge_number or "").strip().upper()
+    phone, card_number = _validate_employee_details(phone_number, id_card_number)
     if not name:
         raise RuleError("Please enter the employee's name.")
     if not badge:
@@ -63,7 +79,7 @@ def add_employee(name, department_id, badge_number):
     with Session(models.engine) as session:
         department = session.get(Department, department_id)
         if department is None:
-            raise RuleError("Please choose a department.")
+            raise RuleError("Please choose a structure.")
 
         same_name = session.scalar(
             select(Employee).where(
@@ -73,9 +89,9 @@ def add_employee(name, department_id, badge_number):
         )
         if same_name is not None:
             if same_name.active:
-                raise RuleError(f"{same_name.name} is already registered in {department.name}.")
+                raise RuleError(f"{same_name.name} is already registered in structure {department.name}.")
             raise RuleError(
-                f"{same_name.name} is already registered in {department.name}, but deactivated.\n"
+                f"{same_name.name} is already registered in structure {department.name}, but deactivated.\n"
                 "Tick 'Show deactivated employees' and use 'Reactivate'."
             )
 
@@ -104,6 +120,8 @@ def add_employee(name, department_id, badge_number):
                 name_key=fold(name),
                 department_id=department_id,
                 badge_number=badge,
+                phone_number=phone,
+                id_card_number=card_number,
                 active=True,
             )
         )
@@ -124,6 +142,8 @@ def list_employees(department_id=None, include_inactive=False):
             Employee.department_id,
             Department.name,
             Employee.badge_number,
+            Employee.phone_number,
+            Employee.id_card_number,
             Employee.active,
         )
         .select_from(Employee)
@@ -138,9 +158,29 @@ def list_employees(department_id=None, include_inactive=False):
     with Session(models.engine) as session:
         rows = session.execute(statement).all()
     return [
-        EmployeeInfo(id=i, name=n, department_id=d, department=dn, badge=b, active=bool(a))
-        for i, n, d, dn, b, a in rows
+        EmployeeInfo(
+            id=i,
+            name=n,
+            department_id=d,
+            department=dn,
+            badge=b,
+            phone_number=phone,
+            id_card_number=card,
+            active=bool(a),
+        )
+        for i, n, d, dn, b, phone, card, a in rows
     ]
+
+
+def update_employee_details(employee_id, phone_number, id_card_number):
+    phone, card_number = _validate_employee_details(phone_number, id_card_number)
+    with Session(models.engine) as session:
+        employee = session.get(Employee, employee_id)
+        if employee is None:
+            raise RuleError("Employee not found.")
+        employee.phone_number = phone
+        employee.id_card_number = card_number
+        session.commit()
 
 
 def change_employee_badge(employee_id, badge_number):
@@ -243,6 +283,10 @@ def check_in(employee_id, now=None):
             raise RuleError("Employee not found.")
         if not employee.active:
             raise RuleError(f"{employee.name} is deactivated.")
+        if not employee.phone_number or employee.id_card_number is None:
+            raise RuleError(
+                f"Add {employee.name}'s phone number and ID card number in the Employees tab before check-in."
+            )
 
         open_visit = session.scalar(
             select(Attendance).where(
@@ -306,6 +350,8 @@ def _records_select():
             Employee.name,
             Department.name,
             Attendance.badge_number,
+            Employee.phone_number,
+            Employee.id_card_number,
             Attendance.time_in,
             Attendance.time_out,
         )
@@ -317,8 +363,17 @@ def _records_select():
 
 def _to_records(rows):
     return [
-        Record(id=i, employee=n, department=d, badge=b, time_in=ti, time_out=to)
-        for i, n, d, b, ti, to in rows
+        Record(
+            id=i,
+            employee=n,
+            department=d,
+            badge=b,
+            phone_number=phone,
+            id_card_number=card,
+            time_in=ti,
+            time_out=to,
+        )
+        for i, n, d, b, phone, card, ti, to in rows
     ]
 
 
