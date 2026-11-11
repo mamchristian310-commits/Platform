@@ -51,8 +51,8 @@ class Employee(Base):
     # unique=True: a badge belongs to ONE employee and can never be shared.
     # A deactivated employee keeps their badge, so it can't be given to anyone else.
     badge_number: Mapped[str] = mapped_column(String(50), unique=True)
-    phone_number: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
-    id_card_number: Mapped[Optional[int]] = mapped_column(nullable=True)
+    phone_number: Mapped[Optional[str]] = mapped_column(String(9), nullable=True)
+    id_card_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Employees are never deleted, only deactivated, so old records keep their meaning
     active: Mapped[bool] = mapped_column(default=True)
@@ -111,7 +111,7 @@ def init_db(db_path=None):
         if "phone_number" not in employee_columns:
             connection.execute(text("ALTER TABLE employee ADD COLUMN phone_number VARCHAR(16)"))
         if "id_card_number" not in employee_columns:
-            connection.execute(text("ALTER TABLE employee ADD COLUMN id_card_number INTEGER"))
+            connection.execute(text("ALTER TABLE employee ADD COLUMN id_card_number VARCHAR(50)"))
 
         # Safety net inside the database itself: even if the program had a bug,
         # SQLite refuses to record a person as being on the platform twice.
@@ -121,3 +121,59 @@ def init_db(db_path=None):
                 "ON attendance(employee_id) WHERE time_out IS NULL"
             )
         )
+
+    id_card_column = next(
+        column
+        for column in inspect(engine).get_columns("employee")
+        if column["name"] == "id_card_number"
+    )
+    if not isinstance(id_card_column["type"], String):
+        _migrate_id_card_number_to_text()
+
+
+def _migrate_id_card_number_to_text():
+    raw_connection = engine.raw_connection()
+    try:
+        cursor = raw_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.execute("BEGIN")
+        try:
+            cursor.execute(
+                """
+                CREATE TABLE employee_new (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    name VARCHAR(150) NOT NULL,
+                    name_key VARCHAR(150) NOT NULL,
+                    department_id INTEGER NOT NULL REFERENCES department (id),
+                    badge_number VARCHAR(50) NOT NULL UNIQUE,
+                    phone_number VARCHAR(9),
+                    id_card_number VARCHAR(50),
+                    active BOOLEAN NOT NULL,
+                    UNIQUE (name_key, department_id)
+                )
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO employee_new
+                    (id, name, name_key, department_id, badge_number, phone_number,
+                     id_card_number, active)
+                SELECT id, name, name_key, department_id, badge_number, phone_number,
+                       CAST(id_card_number AS TEXT), active
+                FROM employee
+                """
+            )
+            cursor.execute("DROP TABLE employee")
+            cursor.execute("ALTER TABLE employee_new RENAME TO employee")
+            raw_connection.commit()
+        except Exception:
+            raw_connection.rollback()
+            raise
+        finally:
+            cursor.execute("PRAGMA foreign_keys=ON")
+
+        violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(f"Foreign key violations after ID card migration: {violations}")
+    finally:
+        raw_connection.close()

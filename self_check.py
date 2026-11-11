@@ -70,6 +70,7 @@ def check_legacy_database_migration(folder):
             name_key VARCHAR(150) NOT NULL,
             department_id INTEGER NOT NULL REFERENCES department(id),
             badge_number VARCHAR(50) NOT NULL UNIQUE,
+            id_card_number INTEGER,
             active BOOLEAN NOT NULL
         );
         CREATE TABLE attendance (
@@ -79,7 +80,7 @@ def check_legacy_database_migration(folder):
             time_out DATETIME
         );
         INSERT INTO department VALUES (1, 'Security', 'security');
-        INSERT INTO employee VALUES (1, 'Legacy Employee', 'legacy employee', 1, 'OLD1', 1);
+        INSERT INTO employee VALUES (1, 'Legacy Employee', 'legacy employee', 1, 'OLD1', 12345, 1);
         INSERT INTO attendance VALUES (1, 1, '2026-10-19 08:00:00', '2026-10-19 09:00:00');
         """
     )
@@ -94,20 +95,32 @@ def check_legacy_database_migration(folder):
     )
     employee = services.list_employees(include_inactive=True)[0]
     check(
-        "existing employees migrate with contact fields unset",
-        employee.phone_number is None and employee.id_card_number is None,
+        "integer ID card values migrate to text and missing phone stays unset",
+        employee.phone_number is None and employee.id_card_number == "12345"
+        and isinstance(employee.id_card_number, str),
     )
+    migration_db = sqlite3.connect(path)
+    id_card_type = next(
+        column[2] for column in migration_db.execute("PRAGMA table_info(employee)")
+        if column[1] == "id_card_number"
+    )
+    check(
+        "ID card column migrates to VARCHAR and attendance foreign keys remain valid",
+        id_card_type == "VARCHAR(50)"
+        and migration_db.execute("PRAGMA foreign_key_check").fetchall() == [],
+    )
+    migration_db.close()
     expect_error(
         "legacy employee must have contact information before check-in",
         services.check_in,
         employee.id,
         contains="phone number and ID card number",
     )
-    services.update_employee_details(employee.id, "+237600000001", "12345")
+    services.update_employee_details(employee.id, "600000001", "LEGACY01")
     employee = services.list_employees(include_inactive=True)[0]
     check(
-        "legacy employee contact details can be completed",
-        employee.phone_number == "+237600000001" and employee.id_card_number == 12345,
+        "legacy employee contact details accept alphanumeric ID cards",
+        employee.phone_number == "600000001" and employee.id_card_number == "LEGACY01",
     )
     models.engine.dispose()
 
@@ -130,18 +143,22 @@ def check_services(folder):
     departments = {name: department_id for department_id, name in services.list_departments()}
     check("departments sorted, Éducation under E", list(departments) == ["Éducation", "Finance", "Security"])
 
-    badge = services.add_employee("Alice  Ngu", departments["Security"], " a12 ", "+237600000001", "1001")
+    badge = services.add_employee("Alice  Ngu", departments["Security"], " a12 ", "600000001", "A1001")
     check("badge is saved in capitals, spaces removed", badge == "A12")
-    services.add_employee("Bob Tamba", departments["Finance"], "B7", "+237600000002", "1002")
-    services.add_employee("Éric Mbarga", departments["Finance"], "B5", "+237600000003", "1003")
-    services.add_employee("Alice Ngu", departments["Finance"], "C3", "+237600000004", "1004")   # same name, other department: allowed
-    expect_error("same person twice: refused", services.add_employee, "alice ngu", departments["Security"], "Z1", "+237600000005", "1005", contains="already registered")
-    expect_error("same person without the accent: refused", services.add_employee, "Eric Mbarga", departments["Finance"], "Z2", "+237600000006", "1006", contains="already registered")
-    expect_error("a badge owned by someone else: refused", services.add_employee, "New Person", departments["Security"], "b7", "+237600000007", "1007", contains="already belongs to Bob Tamba")
-    expect_error("empty badge: refused", services.add_employee, "New Person", departments["Security"], "  ", "+237600000008", "1008", contains="badge number")
-    expect_error("empty name: refused", services.add_employee, "", departments["Security"], "Z3", "+237600000009", "1009", contains="enter the employee")
-    expect_error("phone number requires international format", services.add_employee, "New Person", departments["Security"], "Z4", "237600000010", "1010", contains="+ followed by")
-    expect_error("ID card number must be a positive integer", services.add_employee, "New Person", departments["Security"], "Z5", "+237600000011", "zero", contains="positive integer")
+    services.add_employee("Bob Tamba", departments["Finance"], "B7", "600000002", "0010002")
+    services.add_employee("Éric Mbarga", departments["Finance"], "B5", "600000003", "1003")
+    services.add_employee("Alice Ngu", departments["Finance"], "C3", "600000004", "1004")   # same name, other department: allowed
+    expect_error("same person twice: refused", services.add_employee, "alice ngu", departments["Security"], "Z1", "600000005", "1005", contains="already registered")
+    expect_error("same person without the accent: refused", services.add_employee, "Eric Mbarga", departments["Finance"], "Z2", "600000006", "1006", contains="already registered")
+    expect_error("a badge owned by someone else: refused", services.add_employee, "New Person", departments["Security"], "b7", "600000007", "1007", contains="already belongs to Bob Tamba")
+    expect_error("empty badge: refused", services.add_employee, "New Person", departments["Security"], "  ", "600000008", "1008", contains="badge number")
+    expect_error("empty name: refused", services.add_employee, "", departments["Security"], "Z3", "600000009", "1009", contains="enter the employee")
+    expect_error("phone number rejects the wrong format", services.add_employee, "New Person", departments["Security"], "Z4", "+600000010", "1010", contains="exactly 9 digits")
+    expect_error("phone number requires exactly 9 digits", services.add_employee, "New Person", departments["Security"], "Z6", "60000001", "1011", contains="exactly 9 digits")
+    expect_error("phone number rejects more than 9 digits", services.add_employee, "New Person", departments["Security"], "Z7", "6000000010", "1012", contains="exactly 9 digits")
+    expect_error("ID card number rejects punctuation", services.add_employee, "New Person", departments["Security"], "Z5", "600000011", "ID-100", contains="letters or digits")
+    expect_error("ID card number cannot be empty", services.add_employee, "New Person", departments["Security"], "Z8", "600000012", " ", contains="letters or digits")
+    expect_error("ID card number is limited to 50 characters", services.add_employee, "New Person", departments["Security"], "Z9", "600000013", "A" * 51, contains="1 to 50")
 
     listing = [(e.department, e.name) for e in services.list_employees()]
     check(
@@ -150,10 +167,11 @@ def check_services(folder):
     )
     people = {(e.name, e.department): e for e in services.list_employees()}
     check(
-        "employee list includes phone and integer ID card number",
-        people[("Alice Ngu", "Security")].phone_number == "+237600000001"
-        and people[("Alice Ngu", "Security")].id_card_number == 1001
-        and isinstance(people[("Alice Ngu", "Security")].id_card_number, int),
+        "employee list includes phone and alphanumeric ID card text",
+        people[("Alice Ngu", "Security")].phone_number == "600000001"
+        and people[("Alice Ngu", "Security")].id_card_number == "A1001"
+        and isinstance(people[("Alice Ngu", "Security")].id_card_number, str)
+        and people[("Bob Tamba", "Finance")].id_card_number == "0010002",
     )
     alice_sec = people[("Alice Ngu", "Security")].id
     alice_fin = people[("Alice Ngu", "Finance")].id
@@ -235,8 +253,8 @@ def check_services(folder):
     check("deactivated: still there when asked for", eric in [e.id for e in services.list_employees(include_inactive=True)])
     check("deactivated: his history is kept", [r.employee for r in search(name_text="eric")] == ["Éric Mbarga"])
     expect_error("deactivated: cannot check in", services.check_in, eric, contains="deactivated")
-    expect_error("deactivated: his badge stays reserved", services.add_employee, "Someone New", departments["Finance"], "B5", "+237600000005", "1005", contains="already belongs to Éric Mbarga")
-    expect_error("deactivated: adding him again points to Reactivate", services.add_employee, "éric mbarga", departments["Finance"], "Q9", "+237600000006", "1006", contains="deactivated")
+    expect_error("deactivated: his badge stays reserved", services.add_employee, "Someone New", departments["Finance"], "B5", "600000005", "1005", contains="already belongs to Éric Mbarga")
+    expect_error("deactivated: adding him again points to Reactivate", services.add_employee, "éric mbarga", departments["Finance"], "Q9", "600000006", "1006", contains="deactivated")
     services.reactivate_employee(eric)
     check("reactivated: back in the normal list", eric in [e.id for e in services.list_employees()])
 
@@ -267,7 +285,7 @@ def check_services(folder):
         "Former Badge Attempt",
         departments["Security"],
         "A12",
-        "+237600000007",
+        "600000007",
         "1007",
         contains="previously used by Alice Ngu",
     )
@@ -342,8 +360,8 @@ def check_reports(folder):
     check("Excel keeps the accents", any(c.value == "Éric Mbarga" for row in sheet.iter_rows() for c in row))
     check(
         "Excel records include phone and ID card numbers",
-        any(cell.value == "+237600000001" for row in sheet.iter_rows() for cell in row)
-        and any(cell.value == 1001 for row in sheet.iter_rows() for cell in row),
+        any(cell.value == "600000001" for row in sheet.iter_rows() for cell in row)
+        and any(cell.value == "A1001" for row in sheet.iter_rows() for cell in row),
     )
     check("Excel 'By structure' has a row per structure", workbook["By structure"].max_row == 3)
 
@@ -414,9 +432,19 @@ def run_window_scenario(window, folder):
     )
     window.employee_form_department.lineEdit().clear()
 
+    check(
+        "phone field explains the 9-digit format",
+        window.new_phone_entry.placeholderText() == "phone (9 digits)"
+        and window.new_phone_entry.toolTip() == "Enter exactly 9 digits.",
+    )
+    check(
+        "ID card field explains its alphanumeric format",
+        window.new_id_card_entry.maxLength() == 50
+        and window.new_id_card_entry.toolTip() == "Use 1 to 50 letters or digits.",
+    )
     for name, structure, badge, phone, card in (
-        ("Alice Ngu", "Security", "a12", "+237600000001", "1001"),
-        ("Bob Tamba", "Finance", "B7", "+237600000002", "1002"),
+        ("Alice Ngu", "Security", "a12", "600000001", "A1001"),
+        ("Bob Tamba", "Finance", "B7", "600000002", "0010002"),
     ):
         choose(window.employee_form_department, structure)
         window.new_employee_entry.setText(name)
@@ -435,19 +463,19 @@ def run_window_scenario(window, folder):
         "employee row shows badge, phone, and ID card number",
         tree.topLevelItem(1).child(0).text(0) == "Alice Ngu"
         and tree.topLevelItem(1).child(0).text(1) == "A12"
-        and tree.topLevelItem(1).child(0).text(2) == "+237600000001"
-        and tree.topLevelItem(1).child(0).text(3) == "1001",
+        and tree.topLevelItem(1).child(0).text(2) == "600000001"
+        and tree.topLevelItem(1).child(0).text(3) == "A1001",
     )
     tree.setCurrentItem(tree.topLevelItem(1).child(0))
     with patch(
         "main_window.QInputDialog.getText",
-        side_effect=[("+237600000001", True), ("1001", True)],
+        side_effect=[("600000001", True), ("A1001", True)],
     ):
         window.edit_employee_details_clicked()
     check(
         "Employees tab can update phone and ID card details",
-        tree.topLevelItem(1).child(0).text(2) == "+237600000001"
-        and tree.topLevelItem(1).child(0).text(3) == "1001",
+        tree.topLevelItem(1).child(0).text(2) == "600000001"
+        and tree.topLevelItem(1).child(0).text(3) == "A1001",
     )
 
     window.employee_search.setText("FINANCE")
@@ -473,7 +501,7 @@ def run_window_scenario(window, folder):
     choose(window.employee_form_department, "Finance")
     window.new_employee_entry.setText("Bobby")
     window.new_badge_entry.setText("a12")
-    window.new_phone_entry.setText("+237600000003")
+    window.new_phone_entry.setText("600000003")
     window.new_id_card_entry.setText("1003")
     window.add_employee_clicked()
     check("a badge already owned is refused", messages[-1][0] == "error" and "already belongs to Alice Ngu" in messages[-1][2])
@@ -519,9 +547,9 @@ def run_window_scenario(window, folder):
     )
     check("row shows name, department and badge", [cell(window.today_table, 0, c) for c in (0, 1, 2)] == ["Alice Ngu", "Security", "A12"])
     check(
-        "Today row shows phone and integer ID card number",
-        cell(window.today_table, 0, 3) == "+237600000001"
-        and cell(window.today_table, 0, 4) == "1001",
+        "Today row shows phone and alphanumeric ID card number",
+        cell(window.today_table, 0, 3) == "600000001"
+        and cell(window.today_table, 0, 4) == "A1001",
     )
     check("time out is still empty", cell(window.today_table, 0, 6) == "")
     check(
@@ -594,8 +622,8 @@ def run_window_scenario(window, folder):
     check("History finds today's visit", window.result_label.text() == "1 record(s) found")
     check(
         "History row includes current phone and ID card numbers",
-        cell(window.history_table, 0, 4) == "+237600000001"
-        and cell(window.history_table, 0, 5) == "1001",
+        cell(window.history_table, 0, 4) == "600000001"
+        and cell(window.history_table, 0, 5) == "A1001",
     )
     window.name_filter.setText("zzz")
     window.search_clicked()

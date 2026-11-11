@@ -562,11 +562,12 @@ class MainWindow(QMainWindow):
         self.new_badge_entry = QLineEdit()
         self.new_badge_entry.setPlaceholderText("badge number")
         self.new_phone_entry = QLineEdit()
-        self.new_phone_entry.setPlaceholderText("phone (+123456789...)")
-        self.new_phone_entry.setToolTip("Use + followed by 7 to 15 digits.")
+        self.new_phone_entry.setPlaceholderText("phone (9 digits)")
+        self.new_phone_entry.setToolTip("Enter exactly 9 digits.")
         self.new_id_card_entry = QLineEdit()
         self.new_id_card_entry.setPlaceholderText("ID card number")
-        self.new_id_card_entry.setToolTip("Enter a positive integer.")
+        self.new_id_card_entry.setMaxLength(50)
+        self.new_id_card_entry.setToolTip("Use 1 to 50 letters or digits.")
         add_employee_button = QPushButton("Add employee")
         employee_layout.addWidget(self.new_employee_entry, 2)
         employee_layout.addWidget(QLabel("in"))
@@ -690,7 +691,7 @@ class MainWindow(QMainWindow):
         phone, accepted = QInputDialog.getText(
             self,
             "Update employee details",
-            f"Phone number for {name} (+ followed by 7 to 15 digits):",
+            f"Phone number for {name} (exactly 9 digits):",
             text=employee.phone_number or "",
         )
         if not accepted:
@@ -698,7 +699,7 @@ class MainWindow(QMainWindow):
         id_card, accepted = QInputDialog.getText(
             self,
             "Update employee details",
-            f"ID card number for {name} (positive integer):",
+            f"ID card number for {name} (1 to 50 letters or digits):",
             text=str(employee.id_card_number) if employee.id_card_number is not None else "",
         )
         if not accepted:

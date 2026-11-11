@@ -34,7 +34,7 @@ class EmployeeInfo:
     department: str
     badge: str
     phone_number: Optional[str]
-    id_card_number: Optional[int]
+    id_card_number: Optional[str]
     active: bool
 
 
@@ -47,7 +47,7 @@ class Record:
     department: str
     badge: str
     phone_number: Optional[str]
-    id_card_number: Optional[int]
+    id_card_number: Optional[str]
     time_in: datetime
     time_out: Optional[datetime]
 

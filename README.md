@@ -32,9 +32,9 @@ python main.py
 
 ## A normal day
 1. Employees tab (once): add the structures, then each employee with
-   their own badge, phone number (`+` followed by 7-15 digits), and
-   positive integer ID card number. Type a structure name in the employee
-   form's dropdown to find it quickly.
+   their own badge, 9-digit phone number, and alphanumeric ID card number
+   (up to 50 characters). Type a structure name in the employee form's
+   dropdown to find it quickly.
 2. Today tab: choose the Structure and the Employee. Their badge is
    shown. Give them that badge, keep their ID card, click "Check in".
    The time comes from the computer's clock.
@@ -61,10 +61,9 @@ or another computer, for example at the end of every week.
 
 ## Rules the app enforces
 - A person cannot check in twice without checking out.
-- Each employee must have a phone number and positive integer ID card
-  number. Phone numbers use `+` followed by 7-15 digits. Existing employees
-  need their details filled in from Employees > Update phone and ID card
-  before they can check in.
+- Each employee must have a 9-digit phone number and an ID card number of
+  1 to 50 letters or digits. Existing employees need their details filled
+  in from Employees > Update phone and ID card before they can check in.
 - A badge belongs to one employee only. A deactivated employee keeps
   their badge reserved, so it can never go to someone else. If a badge
   changes, its old number remains reserved for the same employee and past
@@ -100,7 +99,9 @@ the program with a newer version never touches them.
 - Existing records are updated on first launch after this version to store
   the employee's current badge and add the new contact fields. Earlier badge
   changes cannot be reconstructed for visits created before badge history
-  was recorded; existing employees' new contact fields start empty.
+  was recorded; existing employees' new contact fields start empty. Existing
+  integer ID card values are converted to text, but leading zeros that were
+  not previously stored cannot be recovered.
 
 ## How the code is organised
 - `models.py`    the tables, written as Python classes (SQLAlchemy ORM)

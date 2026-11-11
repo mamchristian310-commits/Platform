@@ -54,23 +54,20 @@ def list_departments():
 
 def _validate_employee_details(phone_number, id_card_number):
     phone = (phone_number or "").strip()
-    if not re.fullmatch(r"\+[0-9]{7,15}", phone):
-        raise RuleError("Enter a phone number with + followed by 7 to 15 digits.")
+    if not re.fullmatch(r"[0-9]{9}", phone):
+        raise RuleError("Enter a phone number with exactly 9 digits.")
 
     card_text = str(id_card_number or "").strip()
-    if not re.fullmatch(r"[0-9]+", card_text):
-        raise RuleError("Enter a positive integer ID card number.")
-    card_number = int(card_text)
-    if card_number < 1 or card_number > 9_223_372_036_854_775_807:
-        raise RuleError("The ID card number must be a positive integer.")
-    return phone, card_number
+    if not re.fullmatch(r"[A-Za-z0-9]{1,50}", card_text):
+        raise RuleError("Enter an ID card number with 1 to 50 letters or digits.")
+    return phone, card_text
 
 
 def add_employee(name, department_id, badge_number, phone_number, id_card_number):
     # Returns the badge number as it was saved (capitals, no spaces around it)
     name = clean_name(name)
     badge = (badge_number or "").strip().upper()
-    phone, card_number = _validate_employee_details(phone_number, id_card_number)
+    phone, card_text = _validate_employee_details(phone_number, id_card_number)
     if not name:
         raise RuleError("Please enter the employee's name.")
     if not badge:
@@ -121,7 +118,7 @@ def add_employee(name, department_id, badge_number, phone_number, id_card_number
                 department_id=department_id,
                 badge_number=badge,
                 phone_number=phone,
-                id_card_number=card_number,
+                id_card_number=card_text,
                 active=True,
             )
         )
@@ -173,13 +170,13 @@ def list_employees(department_id=None, include_inactive=False):
 
 
 def update_employee_details(employee_id, phone_number, id_card_number):
-    phone, card_number = _validate_employee_details(phone_number, id_card_number)
+    phone, card_text = _validate_employee_details(phone_number, id_card_number)
     with Session(models.engine) as session:
         employee = session.get(Employee, employee_id)
         if employee is None:
             raise RuleError("Employee not found.")
         employee.phone_number = phone
-        employee.id_card_number = card_number
+        employee.id_card_number = card_text
         session.commit()
 
 
